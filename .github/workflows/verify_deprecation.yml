@@ -45,6 +45,48 @@ jobs:
             echo "✓ GCC 11: deprecation warning fires" || \
             (echo "✗ GCC 11: deprecation warning did NOT fire" && exit 1)
 
+  linux-gcc15:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GCC 15
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-15 g++-15
+          g++-15 --version
+
+      - name: Write test file
+        run: |
+          cat << 'EOF' > test_deprecated.cpp
+          #include "rclcpp/include/rclcpp/deprecation_control.hpp"
+
+          #define MY_PUBLIC __attribute__((visibility("default")))
+
+          class MY_PUBLIC RCLCPP_DEPRECATED_WITH_MSG("The executor no longer uses this")
+          MemoryStrategy
+          {
+          public:
+              virtual ~MemoryStrategy() = default;
+              virtual void foo() = 0;
+          };
+
+          void test() {
+              MemoryStrategy * p = nullptr;
+              (void)p;
+          }
+          EOF
+
+      - name: Compile - expect deprecation warning
+        run: |
+          g++-15 -std=c++20 \
+            -Wdeprecated-declarations \
+            -c test_deprecated.cpp 2>&1 | tee output.txt
+
+          grep -q "deprecated" output.txt && \
+            echo "✓ GCC 15: deprecation warning fires" || \
+            (echo "✗ GCC 15: deprecation warning did NOT fire" && exit 1)
+
   windows-msvc:
     runs-on: windows-latest
     steps:
