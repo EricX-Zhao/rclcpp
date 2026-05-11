@@ -1,0 +1,99 @@
+name: Verify deprecation_control
+
+on: [push]
+
+jobs:
+  linux-gcc11:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GCC 11
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-11 g++-11
+          g++-11 --version
+
+      - name: Write test file
+        run: |
+          cat << 'EOF' > test_deprecated.cpp
+          #include "rclcpp/include/rclcpp/deprecation_control.hpp"
+
+          #define MY_PUBLIC __attribute__((visibility("default")))
+
+          class MY_PUBLIC RCLCPP_DEPRECATED_WITH_MSG("The executor no longer uses this")
+          MemoryStrategy
+          {
+          public:
+              virtual ~MemoryStrategy() = default;
+              virtual void foo() = 0;
+          };
+
+          void test() {
+              MemoryStrategy * p = nullptr;
+              (void)p;
+          }
+          EOF
+
+      - name: Compile - expect deprecation warning
+        run: |
+          g++-11 -std=c++17 \
+            -Wdeprecated-declarations \
+            -c test_deprecated.cpp 2>&1 | tee output.txt
+
+          grep -q "deprecated" output.txt && \
+            echo "✓ GCC 11: deprecation warning fires" || \
+            (echo "✗ GCC 11: deprecation warning did NOT fire" && exit 1)
+
+  windows-msvc:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Show MSVC version
+        shell: cmd
+        run: cl.exe
+
+      - name: Write test file
+        shell: python
+        run: |
+          code = r"""
+          #include "rclcpp/include/rclcpp/deprecation_control.hpp"
+
+          #define MY_PUBLIC __declspec(dllexport)
+
+          class MY_PUBLIC RCLCPP_DEPRECATED_WITH_MSG("The executor no longer uses this")
+          MemoryStrategy
+          {
+          public:
+              virtual ~MemoryStrategy() = default;
+              virtual void foo() = 0;
+          };
+
+          void test() {
+              MemoryStrategy * p = nullptr;
+              (void)p;
+          }
+          """
+          with open("test_deprecated.cpp", "w") as f:
+              f.write(code)
+
+      - name: Compile - expect deprecation warning
+        shell: cmd
+        run: |
+          cl.exe /std:c++17 /W4 ^
+            /c test_deprecated.cpp > output.txt 2>&1
+          type output.txt
+
+          findstr /i "deprecated" output.txt
+          if %errorlevel% == 0 (
+            echo ✓ MSVC: deprecation warning fires
+          ) else (
+            echo ✗ MSVC: deprecation warning did NOT fire
+            exit /b 1
+          )
